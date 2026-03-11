@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cross-sectional-stock-selection"
+version = "0.1.0"
+description = "Validated cross-sectional equity selection pipeline with factor generation, regime-aware modeling, and backtesting."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+  { name = "Jimya" }
+]
+dependencies = [
+  "numpy>=2.0",
+  "pandas>=2.2",
+  "PyYAML>=6.0",
+  "pyarrow>=15.0",
+  "scikit-learn>=1.5",
+  "matplotlib>=3.9",
+  "cvxpy>=1.5",
+  "scs>=3.2",
+  "osqp>=0.6",
+  "torch>=2.6",
+  "databento>=0.39",
+]
+
+[project.scripts]
+quant-pipeline = "quant_pipeline.scripts.main:main"
+run-backtest = "quant_pipeline.scripts.run_backtest:main"
+run-backtest-split = "quant_pipeline.scripts.run_backtest_split:main"
+run-hmm-regime = "quant_pipeline.scripts.run_hmm_regime:main"
+compute-factors-batch = "quant_pipeline.scripts.compute_factors_batch:main"
+compute-factor-ic = "quant_pipeline.scripts.compute_factor_ic:main"
+plot-performance = "quant_pipeline.scripts.plot_performance:main"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["quant_pipeline*"]

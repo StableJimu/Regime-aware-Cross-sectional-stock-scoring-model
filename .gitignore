@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE/editor state
+.spyproject/
+.vscode/
+.idea/
+
+# Local agent state
+.agent/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+
+# Project-generated data
+data/*
+!data/
+!data/.gitkeep

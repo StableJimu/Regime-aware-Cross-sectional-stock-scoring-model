@@ -1,0 +1,16 @@
+# Core runtime
+numpy>=2.0
+pandas>=2.2
+PyYAML>=6.0
+pyarrow>=15.0
+scikit-learn>=1.5
+
+# Reporting / utilities
+matplotlib>=3.9
+databento>=0.39
+
+# Optional model / optimization paths
+torch>=2.6
+cvxpy>=1.5
+scs>=3.2
+osqp>=0.6

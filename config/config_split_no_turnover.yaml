@@ -1,0 +1,91 @@
+paths:
+  project_root: "."
+  raw_dir: "data/raw"
+  panel_path: "data/raw/ohlcv_1d_panel.csv"
+  universe_path: null
+  vix_path: "data/raw/vix.csv"
+  regime_hmm_path: "data/raw/market_regime_hmm.csv"
+  factors_manifest: "data/factors/factors_manifest.json"
+  rates_path: null
+  factors_dir: "data/factors"
+  model_dir: "data/model_params"
+  backtest_dir: "data/backtest_split_no_turnover"
+
+data:
+  start_date: "2019-01-01"
+  end_date: "2026-02-07"
+  market_proxy_ticker: "SPY"
+
+factors:
+  batch_size: 50
+  selected: [
+    "alpha_001","alpha_002","alpha_003","alpha_004","alpha_005","alpha_006","alpha_007","alpha_008","alpha_009","alpha_010",
+    "alpha_011","alpha_012","alpha_013","alpha_014","alpha_015","alpha_016","alpha_017","alpha_018","alpha_019","alpha_020",
+    "alpha_021","alpha_022","alpha_023","alpha_024","alpha_025","alpha_026","alpha_027","alpha_028","alpha_029","alpha_030",
+    "alpha_031","alpha_032","alpha_033","alpha_034","alpha_035","alpha_036","alpha_037","alpha_038","alpha_039","alpha_040",
+    "alpha_041","alpha_042","alpha_043","alpha_044","alpha_045","alpha_046","alpha_047",
+    "alpha_049","alpha_050","alpha_051","alpha_052","alpha_053","alpha_054","alpha_055",
+    "alpha_057",
+    "alpha_060","alpha_061","alpha_062","alpha_064","alpha_065","alpha_066","alpha_068"
+  ]
+
+regime:
+  k_states: 3
+  feature_cols: ["vix_proxy", "mkt_vol_20d"]
+  emit_temp: 0.9
+  var_floor: 1.0
+  hard_prob: 0.99
+  init_diag: 0.7
+  train_window_days: 756
+  refit_freq_days: 21
+
+model:
+  max_factors_per_regime: 5
+  label_horizon: 1
+  model_family: "ridge"
+  ridge_alpha: 1.0
+  score_calibration: "linear"
+  rolling_train_days: 252
+  selection_method: "regime_stepwise"
+  selection_top_n: 5
+  use_regime: true
+  regime_lag_days: 1
+  selection_refit_days: 63
+  selection_window_days: 252
+  soft_regime_weights: true
+  soft_regime_min_weight: 0.01
+  soft_regime_min_eff_n: 40
+  selection_use_soft_regime: true
+  factor_lag: 1
+  ic_decay_half_life_days: 60
+  lstm_lookback: 20
+  lstm_hidden_size: 32
+  lstm_num_layers: 1
+  lstm_dropout: 0.0
+  lstm_epochs: 5
+  lstm_batch_size: 256
+  lstm_lr: 0.001
+
+backtest:
+  long_short: false
+  top_q: 0.04
+  bottom_q: 0.0
+  holding_period: 1
+  rebalance_freq: 1
+  cost_bps: 0.0
+  max_weight: 0.5
+  signal_lag: 1
+  score_norm: "zscore"
+  portfolio_method: "top_q"
+  robust_window: 60
+  robust_uncertainty_k: 0.1
+  robust_lambda_l2: 0.05
+  robust_turnover_mult: 0.0
+  robust_turnover_cap: 0.4
+  robust_penalty_scale: "score_std"
+  robust_max_leverage: 1.0
+  robust_min_leverage: 0.0
+  robust_target_leverage: null
+  robust_breadth_n: 20
+  stress_costs_bps: [0]
+  stress_short_fee_bps: [0]
