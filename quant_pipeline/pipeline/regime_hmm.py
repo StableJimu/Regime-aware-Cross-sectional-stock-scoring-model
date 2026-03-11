@@ -270,12 +270,11 @@ def _enforce_min_regime_duration(
     label: pd.Series,
     proba: pd.DataFrame,
     min_duration: int,
-) -> tuple[pd.Series, pd.DataFrame]:
+) -> pd.Series:
     if min_duration <= 1 or label.empty:
-        return label, proba
+        return label
 
     values = label.astype(int).to_numpy(copy=True)
-    changed = False
     n_obs = len(values)
     start = 0
     while start < n_obs:
@@ -297,18 +296,9 @@ def _enforce_min_regime_duration(
             else:
                 fill_state = int(values[start])
             values[start:end] = fill_state
-            changed = True
         start = end
 
-    if not changed:
-        return label, proba
-
-    label_out = pd.Series(values, index=label.index, name=label.name, dtype=float)
-    proba_out = proba.copy()
-    eye = np.eye(proba.shape[1], dtype=float)
-    forced = eye[values]
-    proba_out.loc[:, :] = forced
-    return label_out, proba_out
+    return pd.Series(values, index=label.index, name=label.name, dtype=float)
 
 
 def fit_market_hmm(
@@ -346,15 +336,13 @@ def fit_market_hmm(
         init_diag=init_diag,
         half_life=half_life,
     )
-    _, gamma = infer_hmm(X_all, A=A, pi=pi, mu=mu_hmm, var=var, emit_temp=emit_temp)
+    states, gamma = infer_hmm(X_all, A=A, pi=pi, mu=mu_hmm, var=var, emit_temp=emit_temp)
 
     prob = gamma / (gamma.sum(axis=1, keepdims=True) + 1e-12)
     max_prob = prob.max(axis=1)
-    hard = np.eye(prob.shape[1])[prob.argmax(axis=1)]
-    prob = np.where((max_prob >= hard_prob)[:, None], hard, prob)
 
     idx = feats.index
-    mkt_label = pd.Series(prob.argmax(axis=1), index=idx, name="regime_label")
+    mkt_label = pd.Series(states, index=idx, name="regime_label", dtype=float)
     mkt_proba = pd.DataFrame(prob, index=idx, columns=[f"regime_{i}" for i in range(prob.shape[1])])
     mkt_label, mkt_proba, A = _reorder_hmm_states(
         market_features=market_features,
@@ -367,8 +355,7 @@ def fit_market_hmm(
         train_end=train_end,
     )
     mkt_proba = _smooth_regime_probabilities(mkt_proba, int(prob_smooth_days))
-    mkt_label = pd.Series(mkt_proba.to_numpy().argmax(axis=1), index=mkt_proba.index, name="regime_label", dtype=float)
-    mkt_label, mkt_proba = _enforce_min_regime_duration(mkt_label, mkt_proba, int(min_regime_duration))
+    mkt_label = _enforce_min_regime_duration(mkt_label, mkt_proba, int(min_regime_duration))
 
     if regime_lag > 0:
         mkt_proba = mkt_proba.shift(regime_lag).ffill()
