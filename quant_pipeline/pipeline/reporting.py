@@ -8,6 +8,22 @@ import numpy as np
 import pandas as pd
 
 
+def build_forward_return_series(
+    ret_1d: pd.Series,
+    horizon: int,
+    signal_lag: int = 1,
+) -> pd.Series:
+    h = max(1, int(horizon))
+    lag = max(0, int(signal_lag))
+    grouped = ret_1d.groupby(level="ticker")
+    out = None
+    for step in range(lag, lag + h):
+        part = grouped.shift(-step)
+        out = part if out is None else (out + part)
+    out.name = f"fwd_ret_{h}d"
+    return out
+
+
 def read_performance(run_dir: Path, perf_file: Path | None = None) -> pd.DataFrame:
     perf_path = perf_file if perf_file is not None else run_dir / "tables" / "performance.parquet"
     if not perf_path.exists():
@@ -68,7 +84,6 @@ def read_panel_for_returns(panel_path: Path) -> pd.DataFrame:
     df = df[["date", "ticker", "close"]].copy()
     df = df.sort_values(["ticker", "date"]).drop_duplicates(subset=["date", "ticker"], keep="last")
     df["ret_1d"] = df.groupby("ticker")["close"].transform(lambda s: np.log(s).diff()).astype(float)
-    df["fwd_ret_1d"] = df.groupby("ticker")["ret_1d"].shift(-1)
     return df.set_index(["date", "ticker"]).sort_index()
 
 
@@ -81,13 +96,14 @@ def compute_daily_ic(scores: pd.DataFrame, fwd_ret: pd.Series, method: str = "sp
         except Exception:
             pass
     fwd = fwd.reindex(scores.index)
-    df = scores.join(fwd.rename("fwd_ret_1d"), how="inner")
+    label_name = str(fwd.name or "fwd_ret")
+    df = scores.join(fwd.rename(label_name), how="inner")
     for col in scores.columns:
         def _ic_one_date(x: pd.DataFrame) -> float:
-            x = x[[col, "fwd_ret_1d"]].dropna()
+            x = x[[col, label_name]].dropna()
             if len(x) < 2:
                 return np.nan
-            return x[col].corr(x["fwd_ret_1d"], method=method)
+            return x[col].corr(x[label_name], method=method)
         ic = df.groupby(level="date", group_keys=False).apply(_ic_one_date)
         ic.name = f"ic_{col}"
         out[col] = ic
@@ -95,14 +111,15 @@ def compute_daily_ic(scores: pd.DataFrame, fwd_ret: pd.Series, method: str = "sp
 
 
 def compute_factor_daily_ic(series: pd.Series, fwd_ret: pd.Series, method: str = "spearman") -> pd.Series:
-    df = pd.concat([series.rename("factor"), fwd_ret.rename("fwd_ret_1d")], axis=1).dropna()
+    label_name = str(fwd_ret.name or "fwd_ret")
+    df = pd.concat([series.rename("factor"), fwd_ret.rename(label_name)], axis=1).dropna()
     if df.empty:
         return pd.Series(dtype=float)
 
     def _ic_one(x: pd.DataFrame) -> float:
         if len(x) < 2:
             return np.nan
-        return x["factor"].corr(x["fwd_ret_1d"], method=method)
+        return x["factor"].corr(x[label_name], method=method)
 
     return df.groupby(level="date", group_keys=False).apply(_ic_one)
 

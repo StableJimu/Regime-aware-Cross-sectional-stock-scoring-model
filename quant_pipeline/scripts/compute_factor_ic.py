@@ -11,7 +11,12 @@ from pathlib import Path
 import pandas as pd
 
 from quant_pipeline.pipeline.artifacts import read_factor_manifest
-from quant_pipeline.pipeline.reporting import compute_factor_daily_ic, compute_ic_ir_stats, read_panel_for_returns
+from quant_pipeline.pipeline.reporting import (
+    build_forward_return_series,
+    compute_factor_daily_ic,
+    compute_ic_ir_stats,
+    read_panel_for_returns,
+)
 from quant_pipeline.pipeline.utils import read_yaml, setup_logger
 
 
@@ -20,6 +25,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", type=str, default="config/config.yaml")
     p.add_argument("--factors", type=str, required=True, help="Comma-separated factor names (e.g., alpha_054,alpha_025)")
     p.add_argument("--raw-panel", type=str, default="data/raw/ohlcv_1d_panel.csv")
+    p.add_argument("--horizon", type=int, default=1, help="Forward return horizon in trading days")
+    p.add_argument("--signal-lag", type=int, default=1, help="Signal lag in trading days")
     return p.parse_args()
 
 
@@ -46,16 +53,16 @@ def main() -> None:
             raise ValueError(f"factor column missing: {f}")
 
     panel = read_panel_for_returns(Path(args.raw_panel))
-    fwd_ret = panel["fwd_ret_1d"]
+    fwd_ret = build_forward_return_series(panel["ret_1d"], horizon=args.horizon, signal_lag=args.signal_lag)
 
-    print("Factor,MeanIC,ICIR")
+    print("Factor,Horizon,MeanIC,ICIR")
     for f in factors:
         ic = compute_factor_daily_ic(fp[f], fwd_ret).dropna()
         if ic.empty:
-            print(f"{f},nan,nan")
+            print(f"{f},{int(args.horizon)},nan,nan")
             continue
         stats = compute_ic_ir_stats(ic)
-        print(f"{f},{stats['mean_ic']:.6f},{stats['icir']:.6f}")
+        print(f"{f},{int(args.horizon)},{stats['mean_ic']:.6f},{stats['icir']:.6f}")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from quant_pipeline.pipeline.reporting import (
+    build_forward_return_series,
     build_benchmark_series,
     compute_daily_ic,
     compute_ic_ir_stats,
@@ -30,6 +31,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--benchmark-file", type=str, default="data/raw/market_index_panel.csv")
     p.add_argument("--benchmark-ticker", type=str, default="SPY")
     p.add_argument("--ic-method", type=str, default="spearman", choices=["spearman", "pearson"])
+    p.add_argument("--ic-horizon", type=int, default=1, help="Forward return horizon in trading days for IC")
+    p.add_argument("--signal-lag", type=int, default=1, help="Signal lag in trading days for IC target")
     p.add_argument("--save", type=str, default=None, help="Save plot to file instead of showing")
     p.add_argument("--no-show", action="store_true", help="Do not call plt.show()")
     p.add_argument("--title", type=str, default="Backtest Performance")
@@ -57,7 +60,7 @@ def main() -> None:
     try:
         scores = read_scores(run_dir)
         panel = read_panel_for_returns(Path(args.raw_panel))
-        fwd_ret = panel["fwd_ret_1d"]
+        fwd_ret = build_forward_return_series(panel["ret_1d"], horizon=args.ic_horizon, signal_lag=args.signal_lag)
         if perf_val is not None:
             ic_series = compute_daily_ic(scores.loc[perf.index], fwd_ret, method=args.ic_method)
             ic_series_val = compute_daily_ic(scores.loc[perf_val.index], fwd_ret, method=args.ic_method)

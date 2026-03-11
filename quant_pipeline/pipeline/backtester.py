@@ -32,6 +32,8 @@ class BacktestConfig:
     long_short: bool = True
     top_q: float = 0.1
     bottom_q: float = 0.1
+    long_budget: float = 1.0
+    short_budget: float = 1.0
     holding_period: int = 1  # days
     rebalance_freq: int = 1  # days
     cost_bps: float = 5.0
@@ -41,6 +43,7 @@ class BacktestConfig:
     score_norm: str | None = None  # "zscore" | None
     portfolio_method: str = "diag_mv"  # "top_q" | "spo" | "robust_spo" | "proportional" | "diag_mv"
     initial_capital: float = 1_000_000.0
+    optimizer_alpha_source: str = "auto"  # "auto" | "calibrated" | "raw" | "score"
     optimizer_alpha_method: str = "rank_normal"  # "raw" | "zscore" | "rank_normal"
     spo_cov_window: int = 60
     spo_risk_aversion: float = 5.0
@@ -108,11 +111,11 @@ class Backtester:
 
             w = pd.Series(0.0, index=s.index)
             longs = s.nlargest(top_n).index
-            w.loc[longs] = 1.0 / top_n
+            w.loc[longs] = float(self.cfg.long_budget) / top_n
 
             if self.cfg.long_short and bottom_n > 0:
                 shorts = s.nsmallest(bottom_n).index
-                w.loc[shorts] = -1.0 / bottom_n
+                w.loc[shorts] = -float(self.cfg.short_budget) / bottom_n
 
             if self.cfg.max_weight is not None:
                 w = w.clip(lower=-self.cfg.max_weight, upper=self.cfg.max_weight)
@@ -161,7 +164,23 @@ class Backtester:
         self,
         score_panel: pd.DataFrame,
     ) -> pd.DataFrame:
-        if "score_calibrated" in score_panel.columns:
+        source = str(getattr(self.cfg, "optimizer_alpha_source", "auto")).strip().lower()
+        if source == "calibrated":
+            if "score_calibrated" not in score_panel.columns:
+                raise ValueError("optimizer_alpha_source='calibrated' requires 'score_calibrated'")
+            alpha = score_panel["score_calibrated"].copy()
+            self.logger.info("optimizer alpha source=score_calibrated")
+        elif source == "raw":
+            if "score_raw" not in score_panel.columns:
+                raise ValueError("optimizer_alpha_source='raw' requires 'score_raw'")
+            alpha = score_panel["score_raw"].copy()
+            self.logger.info("optimizer alpha source=score_raw")
+        elif source == "score":
+            if "score" not in score_panel.columns:
+                raise ValueError("optimizer_alpha_source='score' requires 'score'")
+            alpha = score_panel["score"].copy()
+            self.logger.info("optimizer alpha source=score")
+        elif "score_calibrated" in score_panel.columns:
             alpha = score_panel["score_calibrated"].copy()
             self.logger.info("optimizer alpha source=score_calibrated")
         elif "score_raw" in score_panel.columns:

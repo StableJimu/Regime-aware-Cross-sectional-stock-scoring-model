@@ -35,6 +35,7 @@ plot-performance = "quant_pipeline.scripts.plot_performance:main"
 download-prices = "quant_pipeline.scripts.download_prices:main"
 download-vix = "quant_pipeline.scripts.download_vix:main"
 download-sector-map = "quant_pipeline.scripts.download_sector_map:main"
+run-alpha-decay-analysis = "quant_pipeline.scripts.run_alpha_decay_analysis:main"
 
 [tool.setuptools]
 include-package-data = false

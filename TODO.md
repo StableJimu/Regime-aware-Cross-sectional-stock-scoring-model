@@ -1,38 +1,46 @@
 # TODO
 
-## Immediate
+## Model Upgrades
 
-- Run the first full `k=4` macro-regime split backtest with the new defaults and inspect train/validation behavior end to end.
-- Compare `k=4` macro-full against the previous `k=3` baseline in actual split backtests, not only regime-only sweeps.
-- Check whether the new regime-family priors improve thin-regime factor stability or just add bias.
+- Replace pure regime-sliced fitting with a partially pooled model:
+  - global baseline score
+  - regime-specific deviations
+  - shrink sparse regimes toward the global model
+- Test wider ridge-first screening instead of relying mainly on stepwise-first factor selection.
+- Add model variants that use regime probabilities as continuous features rather than only as partitions.
+- Compare weekly regression targets against rank-oriented objectives.
+- Test multi-horizon forecasting (`1d`, `5d`, `10d`) and combine signals only if the added stability is real.
 
-## Regime Research
+## Factor Capacity
 
-- Validate that the ordered 4-state interpretation remains stable across different 5y/2y anchors.
-- Improve regime evaluation beyond occupancy and smoothness with explicit duration and transition diagnostics.
-- Test whether regime-specific factor caps should differ by regime instead of using one shared cap of `4`.
-- Revisit whether the crisis bucket should be sharpened with additional macro stress features or stronger transition regularization.
+- Run controlled factor-capacity tests at `8`, `10`, and broader screened sets.
+- Check whether the signal improves from more factors or from better shrinkage.
+- Add factor-stability diagnostics across rolling refits and across regimes.
 
-## Modeling
+## Regime Modeling
 
-- Run stepwise factor-capacity experiments at `4`, `8`, and `10` with train/validation comparison.
-- Decide whether rolling ridge should remain the baseline or whether a broader global-selection variant is more stable under `k=4`.
-- Add diagnostics for selected factors by regime over time so regime interpretation is tied to actual model content.
+- Rework thin-regime handling so sparse regimes are not effectively standalone low-sample models.
+- Test whether the rare tail regime should be modeled as a stress overlay rather than a full separate score model.
+- Compare frozen-train HMM behavior against rolling/refit HMM behavior in validation.
 
 ## Portfolio Construction
 
-- Revisit `spo` inside its isolated module with small controlled experiments only.
-- Compare `spo` against `diag_mv`, capped proportional weights, and simpler long-only allocators before promoting it again.
-- Improve optimizer robustness and solver behavior before spending more time on alpha calibration for `spo`.
+- Keep long-only `diag_mv` as the reference baseline.
+- Keep weekly `130/30` as a parallel research track.
+- Revisit `spo` only after the model layer is stronger.
 
 ## Performance Engineering
 
-- Profile the split walk-forward workflow and remove repeated pandas-heavy work in selection, calibration, and rolling scoring.
-- Reduce repeated factor-panel concatenation and repeated date masking in hot paths.
-- Move more regime and factor operations toward denser array-based workflows where practical.
+- Reduce pandas-heavy rolling work in selection and scoring.
+- Add decision-date-only scoring with forward-fill between weekly rebalances.
+- Reduce repeated factor-panel concatenation and masking in split walk-forward runs.
 
-## Validation And Testing
+## Validation
 
-- Add tests for regime feature preparation, factor-family map expansion, and thin-regime selection behavior.
-- Add smoke tests for the split walk-forward workflow with a reduced synthetic panel.
-- Add artifact-level validation so runs fail early when regime files, factor batches, or required macro inputs are inconsistent.
+- Add tests for weekly forward-target construction.
+- Add tests for explicit alpha-source selection in the backtester.
+- Add smoke tests for weekly split walk-forward runs on a reduced panel.
+
+## Documentation
+
+- Keep appending [RESEARCH_CYCLE_LOG.md](/C:/Users/jimya/Projects/Cross%20sectional%20stock%20selection%20Project/RESEARCH_CYCLE_LOG.md) after each major experiment cycle with timestamp, reason, and quantitative outcome.

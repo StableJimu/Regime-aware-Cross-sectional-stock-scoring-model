@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple, Iterable
 import numpy as np
 import pandas as pd
 
+from .targets import build_forward_return_label
 from .utils import setup_logger
 
 
@@ -492,16 +493,13 @@ class ScoringModel:
 
     def build_label(self, prices_panel: pd.DataFrame) -> pd.Series:
         """Build supervised label aligned with factor_panel: MultiIndex [date,ticker].
-        Default: next-day return (shift -horizon).
+        Default: forward cumulative return over label_horizon days.
         """
-        if "ret_1d" not in prices_panel.columns:
-            raise ValueError("prices_panel missing ret_1d")
-        h = int(self.cfg.label_horizon)
-        lag = int(self.cfg.signal_lag)
-        shift_n = max(1, h + lag - 1)
-        y = prices_panel.groupby(level="ticker")["ret_1d"].shift(-shift_n)
-        y.name = "label"
-        return y
+        return build_forward_return_label(
+            prices_panel=prices_panel,
+            label_horizon=int(self.cfg.label_horizon),
+            signal_lag=int(self.cfg.signal_lag),
+        )
 
     def fit_regime_models(
         self,

@@ -1,87 +1,58 @@
 # Cross-Sectional Stock Selection Research
 
-This repo is a research pipeline for daily cross-sectional equity selection. The current view of the project is simple: regime definition matters as much as factor selection, because the regime model decides which parts of the signal library should matter, how much data each model really sees, and how scores should be interpreted downstream.
+This repository is a research pipeline for cross-sectional equity selection. It builds daily Alpha101-style factor panels, conditions the model on a macro regime process, trains rolling cross-sectional scoring models, and evaluates portfolio construction under split walk-forward backtests.
 
-## Current Research View
+The current working setup is:
+- weekly decision horizon
+- `k=4` macro HMM regime model
+- regime-aware rolling ridge scoring
+- `diag_mv` as the practical default allocator
+- no score calibration as the preferred weekly baseline for portfolio construction
 
-- The working regime baseline is now a `k=4` HMM, not `k=3`.
-- The preferred regime feature block is macro-heavy rather than volatility-only:
-  - market return and momentum
-  - downside and absolute-return shock measures
-  - VIX level and VIX momentum
-  - short yield and term spread
-- The current ordered regime interpretation is:
-  - calm growth
-  - constructive / rangebound
-  - stressed correction
-  - crisis / panic
-- These regimes are not only labels for plots. They drive:
-  - soft regime probabilities used in training
-  - regime-specific stepwise IC factor selection
-  - per-regime ridge models
-  - the way model behavior is interpreted in train and validation
+## Goal
 
-## What The Pipeline Does
+The project is trying to answer one question: can a regime-aware cross-sectional model produce a stable weekly stock-selection edge that survives realistic validation, rather than only looking good in-sample or being rescued by portfolio construction?
 
-- loads daily price panels, market proxy data, VIX, and yields
-- computes Alpha101 factors in parquet batches
-- cross-sectionally normalizes the factor panel
-- fits regime-aware models with rolling retraining
-- calibrates optimizer-facing scores with a trailing bucketed mapping
-- backtests multiple portfolio constructors
-- saves split and full-run artifacts, diagnostics, and plots
+## Current Design
 
-## Current Defaults
+### Regime layer
 
-- Regime model:
-  - `k=4`
-  - macro feature block
-  - `emit_temp=0.80`
-  - `var_floor=0.60`
-  - `hard_prob=0.97`
-  - `init_diag=0.70`
-- Modeling:
-  - `ridge`
-  - `selection_method=regime_stepwise`
-  - `max_factors_per_regime=4`
-  - `rolling_train_days=378`
-  - `selection_window_days=378`
-  - soft regime weighting enabled
-- Thin-regime handling:
-  - minimum effective sample size for soft selection is `50`
-  - regime-family priors are blended into stepwise IC ranking
-  - thin regimes are restricted to a smaller candidate set
-- Portfolio construction:
-  - `diag_mv` is the default allocator
-  - `spo` has been isolated for separate research rather than serving as the default
+The market regime model is a 4-state HMM fit on macro features:
+- market return and momentum
+- downside and absolute-return shock measures
+- VIX level and VIX momentum
+- short yield and term spread
 
-## Why `k=4`
+The current semantic ordering is:
+- calm growth
+- constructive / rangebound
+- stressed correction
+- crisis / panic
 
-The earlier `k=3` setup was interpretable, but it compressed too much structure into a single stress bucket. With the broader macro feature set, `k=4` separates normal growth from constructive/rangebound conditions, and separates ordinary corrections from full crisis states. That matters because the factor model is conditional on these regimes. A better regime partition changes both what gets selected and how stable the rolling model fit is.
+These regimes are used inside modeling, not only for diagnostics. Regime probabilities affect factor selection and score generation.
 
-## Thin-Regime Policy
+### Model layer
 
-`k=4` improves interpretability, but it also makes the tail regimes thinner. The current answer is not to borrow neighboring regimes mechanically. Instead, the selector can apply family-level priors when effective sample size gets weak. This is meant to keep crisis-state selection economically sensible instead of purely noisy.
+The model trains rolling cross-sectional scores on a weekly forward target. Factor selection is regime-aware and can apply family-level priors in thin regimes. The current baseline is a rolling ridge model.
 
-The initial factor-family taxonomy is intentionally coarse:
+### Portfolio layer
 
-- `trend`
-- `short_reversal`
-- `volatility_stress`
-- `liquidity_turnover`
-- `quality_defensive`
-- `beta_macro`
-- `residual_cross_section`
+The practical baseline is long-only `diag_mv`. Weekly `130/30` top-quantile portfolios are also supported and are useful as a research comparator. `spo` remains in the codebase, but it is isolated for separate research and is not the default path.
 
-These are used as selection priors, not as hard economic truth.
+## What Works Now
 
-## Portfolio Construction Status
+- Daily raw data loading and market feature assembly
+- Alpha101 factor batch computation
+- Cross-sectional factor normalization
+- Split walk-forward and full-history backtests
+- Weekly target training and weekly rebalancing
+- Regime-aware factor selection and rolling ridge scoring
+- Long-only `diag_mv`, `top_q`, proportional, `spo`, and `robust_spo` constructors
+- Performance plots, benchmark overlays, IC reporting, and alpha-decay analysis
 
-`diag_mv` is the practical baseline right now. In smaller controlled experiments it has been more stable than `spo`, and the recent work has shown that `spo` still needs separate formulation work. The optimizer code is now isolated so it can be revisited without disturbing the rest of the research workflow.
+## Main Entry Points
 
-## Main Workflows
-
-Compute factors:
+Compute factor batches:
 
 ```bash
 python -m quant_pipeline.scripts.compute_factors_batch
@@ -97,22 +68,38 @@ python -m quant_pipeline.scripts.run_backtest_split \
   --stress-level low
 ```
 
-Sweep regime parameters only:
-
-```bash
-python -m quant_pipeline.scripts.run_regime_parameter_sweep --config config/config_split_walk_forward.yaml
-```
-
 Plot a completed run:
 
 ```bash
-python -m quant_pipeline.scripts.plot_performance --run-dir data/backtest_split_walk_forward/<run_id> --split
+python -m quant_pipeline.scripts.plot_performance \
+  --run-dir data/backtest_split_walk_forward/<run_id> \
+  --split \
+  --ic-horizon 5
 ```
 
-## Current Conclusions
+Run alpha-decay analysis:
 
-- Regime modeling is now a core modeling choice, not a reporting layer.
-- `k=4` with macro features is the best current regime specification.
-- Thin-regime sample efficiency is now the main constraint on regime-aware factor selection.
-- `diag_mv` is the correct default until `spo` is reformulated and revalidated.
-- The next research gains are more likely to come from regime tuning, factor-capacity tests, and hot-path performance work than from adding more portfolio complexity immediately.
+```bash
+python -m quant_pipeline.scripts.run_alpha_decay_analysis \
+  --run-dir data/backtest_split_walk_forward/<run_id> \
+  --raw-panel data/raw/ohlcv_1d_panel.csv \
+  --score-cols score \
+  --horizons 1,2,3,5,10
+```
+
+## Key Configs
+
+- Main weekly split baseline:
+  - [config_split_walk_forward.yaml](/C:/Users/jimya/Projects/Cross%20sectional%20stock%20selection%20Project/config/config_split_walk_forward.yaml)
+- Weekly long-only no-calibration research:
+  - [config_split_walk_forward_weekly_diagmv_raw.yaml](/C:/Users/jimya/Projects/Cross%20sectional%20stock%20selection%20Project/config/config_split_walk_forward_weekly_diagmv_raw.yaml)
+- Weekly `130/30` no-calibration research:
+  - [config_split_walk_forward_weekly_topq_130_30.yaml](/C:/Users/jimya/Projects/Cross%20sectional%20stock%20selection%20Project/config/config_split_walk_forward_weekly_topq_130_30.yaml)
+
+## Current Research Read
+
+- Weekly targets are better aligned than daily targets.
+- The regime model is useful, but thin-regime modeling remains the main constraint.
+- Bucket calibration is currently not a good weekly allocator input.
+- Portfolio construction is no longer the main bottleneck.
+- The next major gains should come from improving model thickness and stability, not from adding more allocator complexity.

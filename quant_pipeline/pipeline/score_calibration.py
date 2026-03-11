@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 
+from .targets import build_forward_return_label
+
 
 @dataclass(frozen=True)
 class BucketCalibrationConfig:
@@ -30,9 +32,11 @@ def calibrate_scores_bucketed(
         return score_panel
 
     cfg = cfg or BucketCalibrationConfig()
-    shift_n = max(1, int(label_horizon) + int(signal_lag) - 1)
-    y = prices_panel.groupby(level="ticker")["ret_1d"].shift(-shift_n)
-    y.name = "label"
+    y = build_forward_return_label(
+        prices_panel=prices_panel,
+        label_horizon=int(label_horizon),
+        signal_lag=int(signal_lag),
+    )
 
     base = score_panel[["score"]].copy()
     base["score_raw"] = base["score"]

@@ -53,7 +53,7 @@ regime:
 
 model:
   max_factors_per_regime: 8
-  label_horizon: 1
+  label_horizon: 5
   model_family: "ridge"
   ridge_alpha: 1.0
   score_calibration: "bucketed"
@@ -113,8 +113,8 @@ backtest:
   long_short: false
   top_q: 0.04
   bottom_q: 0.0
-  holding_period: 1
-  rebalance_freq: 1
+  holding_period: 5
+  rebalance_freq: 5
   cost_bps: 0.0
   initial_capital: 1000000.0
   max_weight: 0.5
