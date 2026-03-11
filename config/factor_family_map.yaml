@@ -1,0 +1,15 @@
+default_family: residual_cross_section
+
+families:
+  trend:
+    - alpha_001-alpha_020
+  short_reversal:
+    - alpha_021-alpha_035
+  volatility_stress:
+    - alpha_036-alpha_055
+  liquidity_turnover:
+    - alpha_056-alpha_075
+  quality_defensive:
+    - alpha_076-alpha_090
+  beta_macro:
+    - alpha_091-alpha_101

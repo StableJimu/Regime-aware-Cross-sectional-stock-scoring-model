@@ -54,6 +54,12 @@ class ScoringModelConfig:
     soft_regime_weights: bool = False
     soft_regime_min_weight: float = 0.0
     soft_regime_min_eff_n: int = 0
+    min_factor_non_nan_frac: float = 0.02
+    min_factor_non_nan_count: int = 1000
+    regime_family_prior_strength: float = 0.0
+    thin_regime_family_prior_strength: float = 0.0
+    thin_regime_eff_n_threshold: int = 0
+    thin_regime_top_n: int = 0
     # stock regime params
     trend_short_window: int = 5
     trend_long_window: int = 20
@@ -119,6 +125,9 @@ class FactorSelector:
         date_weights: Optional[pd.Series] = None,
         min_weight: float = 0.0,
         min_effective_n: int = 0,
+        factor_family_map: Optional[Dict[str, str]] = None,
+        family_prior_weights: Optional[Dict[str, float]] = None,
+        prior_strength: float = 0.0,
     ) -> List[str]:
         """Greedy orthogonal stepwise selection using IC time series.
         Uses IC series (length T) per factor to keep compute fast.
@@ -201,6 +210,11 @@ class FactorSelector:
             for c in remaining:
                 idx = cols.index(c)
                 score = _score_residual(ic_mat[:, idx], selected_mat)
+                if prior_strength and family_prior_weights:
+                    fam = "residual_cross_section"
+                    if factor_family_map is not None:
+                        fam = factor_family_map.get(c, fam)
+                    score += float(prior_strength) * float(family_prior_weights.get(fam, 0.0))
                 if score > best_score:
                     best_score = score
                     best = c
@@ -337,6 +351,55 @@ class ScoringModel:
         self.models_: Dict[int, BaseModel] = {}
         self.selected_factors_: Dict[int, List[str]] = {}
         self.candidate_factors_: Optional[List[str]] = None
+        self.factor_family_map_: Dict[str, str] = {}
+        self.regime_family_priors_: Dict[int, Dict[str, float]] = {}
+        self.thin_regime_eff_n_threshold_: int = 0
+        self.thin_regime_top_n_: int = 0
+
+    @staticmethod
+    def _effective_n_from_weights(weights: Optional[pd.Series | np.ndarray]) -> Optional[float]:
+        if weights is None:
+            return None
+        w = np.asarray(weights, dtype=float)
+        w = w[np.isfinite(w) & (w > 0.0)]
+        if w.size == 0:
+            return 0.0
+        return float((w.sum() ** 2) / (np.sum(w ** 2) + 1e-12))
+
+    def _select_candidates_for_regime(
+        self,
+        regime_key: int,
+        candidate_factors: List[str],
+        date_weights: Optional[pd.Series],
+        top_n: int,
+    ) -> tuple[List[str], int, float]:
+        n_eff = self._effective_n_from_weights(date_weights)
+        thin = (
+            n_eff is not None
+            and self.thin_regime_eff_n_threshold_ > 0
+            and n_eff < float(self.thin_regime_eff_n_threshold_)
+        )
+        prior_weights = self.regime_family_priors_.get(regime_key, {})
+        prior_strength = float(self.cfg.regime_family_prior_strength)
+        top_n_eff = int(top_n)
+        candidates = list(candidate_factors)
+        if thin:
+            preferred = {
+                fam for fam, weight in prior_weights.items()
+                if float(weight) > 0.0
+            }
+            filtered = [
+                c for c in candidate_factors
+                if self.factor_family_map_.get(c, "residual_cross_section") in preferred
+            ]
+            if len(filtered) >= max(2, min(top_n, self.thin_regime_top_n_ or top_n)):
+                candidates = filtered
+            prior_strength = float(
+                self.cfg.thin_regime_family_prior_strength or self.cfg.regime_family_prior_strength
+            )
+            if self.thin_regime_top_n_ and self.thin_regime_top_n_ > 0:
+                top_n_eff = min(top_n_eff, int(self.thin_regime_top_n_))
+        return candidates, top_n_eff, prior_strength
 
     @staticmethod
     def _normalize_gamma(gamma: pd.DataFrame, k: int) -> pd.DataFrame:
@@ -394,7 +457,11 @@ class ScoringModel:
         return model, good_cols
 
     def _filter_factor_columns(self, df: pd.DataFrame, factor_cols: List[str]) -> List[str]:
-        min_non_nan = max(1, int(0.2 * len(df)))
+        min_non_nan = max(
+            1,
+            int(self.cfg.min_factor_non_nan_frac * len(df)),
+            int(self.cfg.min_factor_non_nan_count),
+        )
         good_cols = [c for c in factor_cols if df[c].notna().sum() >= min_non_nan]
         if not good_cols:
             raise ValueError("All factor columns are too sparse after NaN filtering")
@@ -502,35 +569,61 @@ class ScoringModel:
         soft_min_weight: float = 0.0,
         soft_min_eff_n: int = 0,
         fallback_to_hard: bool = True,
+        factor_family_map: Optional[Dict[str, str]] = None,
+        regime_family_priors: Optional[Dict[int, Dict[str, float]]] = None,
+        thin_regime_eff_n_threshold: int = 0,
+        thin_regime_top_n: int = 0,
     ) -> None:
         """Fit one model per regime using orthogonal stepwise selection."""
         y = self.build_label(prices_panel)
         models: Dict[int, BaseModel] = {}
         selected: Dict[int, List[str]] = {}
         self.candidate_factors_ = list(candidate_factors)
+        self.factor_family_map_ = dict(factor_family_map or {})
+        self.regime_family_priors_ = dict(regime_family_priors or {})
+        self.thin_regime_eff_n_threshold_ = int(thin_regime_eff_n_threshold)
+        self.thin_regime_top_n_ = int(thin_regime_top_n)
 
         dates = factor_panel.index.get_level_values("date")
         for k, mask in regime_masks.items():
             regime_dates = dates[mask.values].unique()
             date_weights = None if regime_date_weights is None else regime_date_weights.get(k)
+            regime_candidates, regime_top_n, prior_strength = self._select_candidates_for_regime(
+                k,
+                candidate_factors,
+                date_weights,
+                top_n,
+            )
             cols = self.selector.select_orthogonal_stepwise(
-                factor_panel=factor_panel[candidate_factors],
+                factor_panel=factor_panel[regime_candidates],
                 label=y,
                 regime_dates=None if date_weights is not None else regime_dates,
-                top_n=top_n,
+                top_n=regime_top_n,
                 decay_half_life_days=int(self.cfg.ic_decay_half_life_days),
                 date_weights=date_weights,
                 min_weight=soft_min_weight,
                 min_effective_n=soft_min_eff_n,
+                factor_family_map=self.factor_family_map_,
+                family_prior_weights=self.regime_family_priors_.get(k),
+                prior_strength=prior_strength,
             )
             if not cols and fallback_to_hard and date_weights is not None:
                 self.logger.warning(f"soft selection empty for regime {k}; falling back to hard regime dates")
+                regime_candidates, regime_top_n, prior_strength = self._select_candidates_for_regime(
+                    k,
+                    candidate_factors,
+                    None,
+                    top_n,
+                )
                 cols = self.selector.select_orthogonal_stepwise(
-                    factor_panel=factor_panel[candidate_factors],
+                    factor_panel=factor_panel[regime_candidates],
                     label=y,
                     regime_dates=regime_dates,
-                    top_n=top_n,
+                    top_n=regime_top_n,
                     decay_half_life_days=int(self.cfg.ic_decay_half_life_days),
+                    factor_family_map=self.factor_family_map_,
+                    family_prior_weights=self.regime_family_priors_.get(k),
+                    prior_strength=prior_strength,
                 )
             if not cols:
                 raise ValueError(f"No factors selected for regime {k}")
@@ -574,8 +667,18 @@ class ScoringModel:
             max_factors_per_regime=prev.max_factors_per_regime,
             label_horizon=prev.label_horizon,
             signal_lag=prev.signal_lag,
+            rolling_train_days=prev.rolling_train_days,
+            factor_lag=prev.factor_lag,
             model_family="ridge",
             ridge_alpha=prev.ridge_alpha,
+            ic_decay_half_life_days=prev.ic_decay_half_life_days,
+            selection_refit_days=prev.selection_refit_days,
+            selection_window_days=prev.selection_window_days,
+            soft_regime_weights=prev.soft_regime_weights,
+            soft_regime_min_weight=prev.soft_regime_min_weight,
+            soft_regime_min_eff_n=prev.soft_regime_min_eff_n,
+            min_factor_non_nan_frac=prev.min_factor_non_nan_frac,
+            min_factor_non_nan_count=prev.min_factor_non_nan_count,
         )
 
         models: Dict[int, BaseModel] = {}
@@ -682,12 +785,24 @@ class ScoringModel:
                 new_selected: Dict[int, List[str]] = {}
                 for k, mask in regime_masks.items():
                     regime_dates = dates[mask.values & sel_mask_dates].unique()
+                    w_dates = market_regime_proba.get(f"regime_{k}")
+                    if w_dates is not None:
+                        w_dates = w_dates.reindex(sel_dates).fillna(0.0)
+                    regime_candidates, regime_top_n, prior_strength = self._select_candidates_for_regime(
+                        k,
+                        self.candidate_factors_,
+                        w_dates if self.cfg.soft_regime_weights else None,
+                        int(self.cfg.max_factors_per_regime),
+                    )
                     cols = self.selector.select_orthogonal_stepwise(
-                        factor_panel=factor_panel[self.candidate_factors_],
+                        factor_panel=factor_panel[regime_candidates],
                         label=y,
                         regime_dates=regime_dates,
-                        top_n=int(self.cfg.max_factors_per_regime),
+                        top_n=regime_top_n,
                         decay_half_life_days=int(self.cfg.ic_decay_half_life_days),
+                        factor_family_map=self.factor_family_map_,
+                        family_prior_weights=self.regime_family_priors_.get(k),
+                        prior_strength=prior_strength,
                     )
                     if cols:
                         new_selected[k] = cols

@@ -8,46 +8,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
-from quant_pipeline.pipeline.utils import read_yaml, setup_logger
 from quant_pipeline.pipeline.artifacts import read_factor_manifest
-
-
-def _read_panel_for_returns(panel_path: Path) -> pd.DataFrame:
-    if not panel_path.exists():
-        raise FileNotFoundError(f"raw panel not found: {panel_path}")
-    if panel_path.suffix.lower() == ".csv":
-        df = pd.read_csv(panel_path, usecols=["ts_event", "symbol", "close"])
-        df["ts_event"] = pd.to_datetime(df["ts_event"], utc=True, errors="coerce")
-        df = df.dropna(subset=["ts_event"])
-        df["date"] = df["ts_event"].dt.tz_convert(None).dt.normalize()
-        df = df.rename(columns={"symbol": "ticker"})
-    else:
-        df = pd.read_parquet(panel_path)
-        if {"date", "ticker", "close"}.issubset(df.columns):
-            df["date"] = pd.to_datetime(df["date"])
-        else:
-            raise ValueError(f"{panel_path} missing required columns for returns")
-    df = df[["date", "ticker", "close"]].copy()
-    df = df.sort_values(["ticker", "date"]).drop_duplicates(subset=["date", "ticker"], keep="last")
-    df["ret_1d"] = df.groupby("ticker")["close"].transform(lambda s: np.log(s).diff()).astype(float)
-    df["fwd_ret_1d"] = df.groupby("ticker")["ret_1d"].shift(-1)
-    return df.set_index(["date", "ticker"]).sort_index()
-
-
-def _daily_ic(series: pd.Series, fwd_ret: pd.Series) -> pd.Series:
-    df = pd.concat([series.rename("factor"), fwd_ret.rename("fwd_ret_1d")], axis=1).dropna()
-    if df.empty:
-        return pd.Series(dtype=float)
-
-    def _ic_one(x: pd.DataFrame) -> float:
-        if len(x) < 2:
-            return np.nan
-        return x["factor"].corr(x["fwd_ret_1d"], method="spearman")
-
-    return df.groupby(level="date", group_keys=False).apply(_ic_one)
+from quant_pipeline.pipeline.reporting import compute_factor_daily_ic, compute_ic_ir_stats, read_panel_for_returns
+from quant_pipeline.pipeline.utils import read_yaml, setup_logger
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,18 +45,17 @@ def main() -> None:
         if f not in fp.columns:
             raise ValueError(f"factor column missing: {f}")
 
-    panel = _read_panel_for_returns(Path(args.raw_panel))
+    panel = read_panel_for_returns(Path(args.raw_panel))
     fwd_ret = panel["fwd_ret_1d"]
 
     print("Factor,MeanIC,ICIR")
     for f in factors:
-        ic = _daily_ic(fp[f], fwd_ret).dropna()
+        ic = compute_factor_daily_ic(fp[f], fwd_ret).dropna()
         if ic.empty:
             print(f"{f},nan,nan")
             continue
-        mean_ic = ic.mean()
-        icir = mean_ic / ic.std(ddof=0) if ic.std(ddof=0) > 0 else np.nan
-        print(f"{f},{mean_ic:.6f},{icir:.6f}")
+        stats = compute_ic_ir_stats(ic)
+        print(f"{f},{stats['mean_ic']:.6f},{stats['icir']:.6f}")
 
 
 if __name__ == "__main__":

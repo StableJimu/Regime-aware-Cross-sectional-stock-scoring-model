@@ -11,7 +11,7 @@ paths:
   rates_path: null
   factors_dir: "data/factors"
   model_dir: "data/model_params"
-  backtest_dir: "data/backtest_split_frozen"
+  backtest_dir: "data/backtest_split_walk_forward_spo"
 
 data:
   start_date: "2019-01-01"
@@ -35,24 +35,17 @@ factors:
   ]
 
 regime:
-  k_states: 4
-  feature_cols: [
-    "mkt_ret_1d","mkt_ret_5d","mkt_ret_20d","mkt_mom_20_5",
-    "mkt_abs_ret_1d","mkt_abs_ret_5d","mkt_neg_ret_1d","mkt_neg_ret_5d",
-    "vix","vix_ret_5d","vix_z_20","vix_ratio_20",
-    "y2","y2_chg_20d","term_spread","term_spread_chg_20d"
-  ]
-  emit_temp: 0.80
-  var_floor: 0.60
-  hard_prob: 0.97
-  init_diag: 0.80
-  prob_smooth_days: 5
-  min_regime_duration: 5
+  k_states: 3
+  feature_cols: ["vix_proxy", "mkt_vol_20d"]
+  emit_temp: 0.9
+  var_floor: 1.0
+  hard_prob: 0.99
+  init_diag: 0.7
   train_window_days: 756
   refit_freq_days: 21
 
 model:
-  max_factors_per_regime: 8
+  max_factors_per_regime: 5
   label_horizon: 1
   model_family: "ridge"
   ridge_alpha: 1.0
@@ -61,44 +54,18 @@ model:
   score_calibration_buckets: 10
   score_calibration_min_total_obs: 5000
   score_calibration_min_bucket_obs: 100
-  rolling_train_days: 378
-  validation_mode: "frozen"
+  rolling_train_days: 252
+  validation_mode: "walk_forward"
   selection_method: "regime_stepwise"
-  selection_top_n: 8
+  selection_top_n: 5
   use_regime: true
   regime_lag_days: 1
   selection_refit_days: 63
-  selection_window_days: 378
+  selection_window_days: 252
   soft_regime_weights: true
   soft_regime_min_weight: 0.01
-  soft_regime_min_eff_n: 50
+  soft_regime_min_eff_n: 40
   selection_use_soft_regime: true
-  regime_factor_family_map_path: "config/factor_family_map.yaml"
-  regime_family_prior_strength: 0.10
-  thin_regime_family_prior_strength: 0.30
-  thin_regime_eff_n_threshold: 50
-  thin_regime_top_n: 4
-  regime_family_priors:
-    regime_0:
-      trend: 0.20
-      quality_defensive: 0.15
-      short_reversal: -0.05
-      volatility_stress: -0.10
-    regime_1:
-      trend: 0.15
-      liquidity_turnover: 0.10
-      residual_cross_section: 0.05
-      volatility_stress: -0.05
-    regime_2:
-      quality_defensive: 0.20
-      short_reversal: 0.15
-      volatility_stress: 0.15
-      trend: -0.05
-    regime_3:
-      quality_defensive: 0.25
-      volatility_stress: 0.25
-      liquidity_turnover: 0.15
-      trend: -0.15
   factor_lag: 1
   ic_decay_half_life_days: 60
   lstm_lookback: 20
@@ -115,13 +82,13 @@ backtest:
   bottom_q: 0.0
   holding_period: 1
   rebalance_freq: 1
-  cost_bps: 0.0
+  cost_bps: 5.0
   initial_capital: 1000000.0
-  max_weight: 0.5
+  max_weight: 0.20
   signal_lag: 1
   score_norm: "zscore"
-  portfolio_method: "diag_mv"
-  optimizer_alpha_method: "rank_normal"
+  portfolio_method: "spo"
+  optimizer_alpha_method: "raw"
   spo_cov_window: 60
   spo_risk_aversion: 5.0
   spo_cov_shrinkage: 0.2
@@ -132,8 +99,8 @@ backtest:
   robust_turnover_cap: 0.4
   robust_penalty_scale: "score_std"
   robust_max_leverage: 1.0
-  robust_min_leverage: 0.0
-  robust_target_leverage: null
-  robust_breadth_n: 20
-  stress_costs_bps: [0]
-  stress_short_fee_bps: [0]
+  robust_min_leverage: 1.0
+  robust_target_leverage: 1.0
+  robust_breadth_n: 10
+  stress_costs_bps: [0, 5, 10, 20]
+  stress_short_fee_bps: [0, 0, 100, 300]
