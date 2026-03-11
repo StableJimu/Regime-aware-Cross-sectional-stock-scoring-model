@@ -101,12 +101,31 @@ def _fit_hmm(
     var_floor: float = 1.0,
     half_life: int = 63,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    from sklearn.cluster import KMeans
-
     T, D = X.shape
-    km = KMeans(n_clusters=K, n_init=5, random_state=42)
-    labels = km.fit_predict(X)
-    mu = km.cluster_centers_
+    try:
+        from sklearn.cluster import KMeans
+
+        km = KMeans(n_clusters=K, n_init=5, random_state=42)
+        labels = km.fit_predict(X)
+        mu = km.cluster_centers_
+    except Exception:
+        rng = np.random.default_rng(42)
+        if T < K:
+            raise ValueError(f"Not enough samples for k-means init: n_samples={T}, K={K}")
+        mu = X[rng.choice(T, size=K, replace=False)].copy()
+        labels = np.zeros(T, dtype=int)
+        for _ in range(25):
+            dist2 = np.sum((X[:, None, :] - mu[None, :, :]) ** 2, axis=2)
+            new_labels = np.argmin(dist2, axis=1)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for k in range(K):
+                mask = labels == k
+                if mask.any():
+                    mu[k] = X[mask].mean(axis=0)
+                else:
+                    mu[k] = X[rng.integers(0, T)]
 
     var = np.zeros((K, D))
     for k in range(K):
@@ -222,8 +241,8 @@ def main() -> None:
     logger = setup_logger("run_hmm_regime")
     cfg = read_yaml(Path(args.config))
 
-    mkt_path = Path(cfg["paths"]["raw_dir"]) / "market_index_panel.csv"
-    rates_path = Path(cfg["paths"]["raw_dir"]) / "treasury_yields.csv"
+    mkt_path = Path(cfg["paths"].get("market_index_path") or (Path(cfg["paths"]["raw_dir"]) / "market_index_panel.csv"))
+    rates_path = Path(cfg["paths"].get("rates_path") or (Path(cfg["paths"]["raw_dir"]) / "treasury_yields.csv"))
     out_path = Path(cfg["paths"]["regime_hmm_path"])
     vix_path = Path(cfg["paths"]["vix_path"])
 

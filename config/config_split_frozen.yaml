@@ -11,7 +11,7 @@ paths:
   rates_path: null
   factors_dir: "data/factors"
   model_dir: "data/model_params"
-  backtest_dir: "data/backtest"
+  backtest_dir: "data/backtest_split_frozen"
 
 data:
   start_date: "2019-01-01"
@@ -51,6 +51,7 @@ model:
   ridge_alpha: 1.0
   score_calibration: "linear"
   rolling_train_days: 252
+  validation_mode: "frozen"
   selection_method: "regime_stepwise"
   selection_top_n: 5
   use_regime: true
@@ -77,7 +78,7 @@ backtest:
   bottom_q: 0.0
   holding_period: 1
   rebalance_freq: 1
-  cost_bps: 5.0
+  cost_bps: 0.0
   max_weight: 0.5
   signal_lag: 1
   score_norm: "zscore"
@@ -85,12 +86,12 @@ backtest:
   robust_window: 60
   robust_uncertainty_k: 0.1
   robust_lambda_l2: 0.05
-  robust_turnover_mult: 0.05
+  robust_turnover_mult: 0.0
   robust_turnover_cap: 0.4
   robust_penalty_scale: "score_std"
   robust_max_leverage: 1.0
   robust_min_leverage: 0.0
   robust_target_leverage: null
   robust_breadth_n: 20
-  stress_costs_bps: [0, 5, 10, 20]
-  stress_short_fee_bps: [0, 0, 100, 300]
+  stress_costs_bps: [0]
+  stress_short_fee_bps: [0]

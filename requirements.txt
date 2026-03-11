@@ -7,7 +7,7 @@ scikit-learn>=1.5
 
 # Reporting / utilities
 matplotlib>=3.9
-databento>=0.39
+yfinance>=0.2.54
 
 # Optional model / optimization paths
 torch>=2.6

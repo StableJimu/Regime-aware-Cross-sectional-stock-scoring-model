@@ -37,7 +37,7 @@ class DataLoader:
     """
     Purpose
     -------
-    Load raw daily OHLCV CSV per ticker (Databento ohlcv-1d) and build:
+    Load raw daily OHLCV CSV per ticker/panel and build:
       (1) prices_panel: MultiIndex [date, ticker], columns: open, high, low, close, volume, ret_1d, vol_20d
       (2) market_features: Index [date], columns used by HMM: mkt_ret_1d, mkt_vol_20d, (optional y2, term_spread)
 
@@ -126,7 +126,7 @@ class DataLoader:
         # daily: use date (UTC) as canonical date; later you can convert to exchange TZ if needed
         df["date"] = df["ts_event"].dt.tz_convert(None).dt.normalize()
 
-        # Canonical OHLCV names (Databento is usually already these; but keep robust)
+        # Canonical OHLCV names; keep this mapping tolerant of source differences.
         rename_map = {}
         for c in df.columns:
             lc = c.lower()

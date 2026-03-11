@@ -297,6 +297,7 @@ def _score_with_rolling_glm(
     regime_masks: dict[int, pd.Series],
     market_regime_proba: pd.DataFrame,
     window_days: int,
+    max_train_date: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     if not scorer.selected_factors_:
         raise RuntimeError("No selected factors. Fit selection first.")
@@ -311,10 +312,15 @@ def _score_with_rolling_glm(
 
     base = factor_panel.copy()
     base["label"] = y
+    train_cutoff = None if max_train_date is None else pd.Timestamp(max_train_date)
 
     for i, d in enumerate(unique_dates):
-        win_start = max(0, i - window_days + 1)
-        win_dates = unique_dates[win_start : i + 1]
+        hist_dates = unique_dates[unique_dates < d]
+        if train_cutoff is not None:
+            hist_dates = hist_dates[hist_dates <= train_cutoff]
+        if len(hist_dates) == 0:
+            continue
+        win_dates = hist_dates[-window_days:]
         win_mask_dates = dates.isin(win_dates)
 
         for k, cols in scorer.selected_factors_.items():
@@ -382,7 +388,9 @@ def _calibrate_scores_linear(
 
     out = score_panel.copy()
     out["score_raw"] = out["score"]
-    out["score"] = a + b * out["score_raw"]
+    out["score_calibrated"] = a + b * out["score_raw"]
+    # Keep ranking on raw cross-sectional scores; calibrated values are diagnostic only.
+    out["score"] = out["score_raw"]
     return out
 
 def parse_args() -> argparse.Namespace:
@@ -419,6 +427,7 @@ def main() -> None:
         start_date=cfg["data"]["start_date"],
         end_date=cfg["data"]["end_date"],
         panel_path=Path(cfg["paths"]["panel_path"]) if cfg["paths"].get("panel_path") else None,
+        market_index_path=Path(cfg["paths"]["market_index_path"]) if cfg["paths"].get("market_index_path") else None,
         rates_path=Path(cfg["paths"]["rates_path"]) if cfg["paths"].get("rates_path") else None,
         market_proxy_ticker=cfg["data"].get("market_proxy_ticker", "SPY"),
     )
@@ -453,7 +462,8 @@ def main() -> None:
         args.val_years,
         anchor=args.split_anchor,
     )
-    logger.info(f"train: {start.date()} -> {train_end.date()} | val: {train_end.date()} -> {val_end.date()}")
+    val_start = train_end + pd.Timedelta(days=1)
+    logger.info(f"train: {start.date()} -> {train_end.date()} | val: {val_start.date()} -> {val_end.date()}")
 
     # 4) Market regime from HMM fit on train window
     regime_cfg = cfg.get("regime", {})
@@ -494,6 +504,11 @@ def main() -> None:
         soft_regime_min_weight=float(cfg["model"].get("soft_regime_min_weight", 0.0)),
         soft_regime_min_eff_n=int(cfg["model"].get("soft_regime_min_eff_n", 0)),
     )
+    validation_mode = str(cfg["model"].get("validation_mode", "walk_forward")).strip().lower()
+    if validation_mode not in {"walk_forward", "frozen"}:
+        raise ValueError("model.validation_mode must be 'walk_forward' or 'frozen'")
+    score_train_cutoff = train_end if validation_mode == "frozen" else None
+    logger.info(f"split validation_mode={validation_mode} (t-1 scoring enforced)")
     scorer = ScoringModel(sm_cfg)
     train_mask = _mask_dates(factor_panel.index, start, train_end)
     dates = factor_panel.index.get_level_values("date")
@@ -537,6 +552,7 @@ def main() -> None:
                     regime_masks=masks_full,
                     market_regime_proba=proba,
                     window_days=sm_cfg.rolling_train_days,
+                    max_train_date=score_train_cutoff,
                 )
             else:
                 score_panel = scorer.score_with_rolling_ridge(
@@ -545,6 +561,7 @@ def main() -> None:
                     regime_masks=masks_full,
                     market_regime_proba=proba,
                     window_days=sm_cfg.rolling_train_days,
+                    max_train_date=score_train_cutoff,
                 )
         else:
             score_panel = scorer.score(factor_panel, prices_panel, None, None)
@@ -594,6 +611,7 @@ def main() -> None:
                     regime_masks=full_masks,
                     market_regime_proba=mkt_proba,
                     window_days=sm_cfg.rolling_train_days,
+                    max_train_date=score_train_cutoff,
                 )
             else:
                 full_masks = {
@@ -606,6 +624,7 @@ def main() -> None:
                     regime_masks=full_masks,
                     market_regime_proba=mkt_proba,
                     window_days=sm_cfg.rolling_train_days,
+                    max_train_date=score_train_cutoff,
                 )
         else:
             score_panel = scorer.score(factor_panel, prices_panel, mkt_proba, mkt_label)
@@ -701,6 +720,7 @@ def main() -> None:
             },
             "train_years": args.train_years,
             "val_years": args.val_years,
+            "validation_mode": validation_mode,
             "model_family": cfg["model"]["model_family"],
         },
     )

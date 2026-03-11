@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Alpha 101 (WorldQuant) factor implementations based on Appendix A.
-Only alphas requiring OHLCV and VWAP/ADV are included.
-Alphas requiring industry neutralization or market cap are omitted.
+
+The library now includes the full Alpha101 set. A subset of factors require
+static ticker metadata to be joined onto the price panel before computation:
+
+- `industry` or `sector` for cross-sectional neutralization
+- `market_value` for alpha_056
 
 VWAP handling:
 If `vwap` column is not present, we use a proxy: (high + low + close) / 3.
@@ -151,6 +155,29 @@ def _adv(panel: pd.DataFrame, d: float) -> pd.Series:
     volume = _get_series(panel, "volume")
     dollar_vol = close * volume
     return _sum(dollar_vol, d) / _floor_window(d)
+
+
+def _group_key(panel: pd.DataFrame, primary: str, fallback: str | None = None) -> pd.Series:
+    if primary in panel.columns:
+        return panel[primary].astype(str)
+    if fallback is not None and fallback in panel.columns:
+        return panel[fallback].astype(str)
+    missing = [c for c in [primary, fallback] if c is not None]
+    raise KeyError(f"Missing required group column(s): {missing}")
+
+
+def _ind_neutralize(s: pd.Series, panel: pd.DataFrame, group_col: str = "industry") -> pd.Series:
+    groups = _group_key(panel, group_col, fallback="sector")
+    grouped = [s.index.get_level_values("date"), groups.reindex(s.index)]
+    return s - s.groupby(grouped).transform("mean")
+
+
+def _market_value(panel: pd.DataFrame) -> pd.Series:
+    if "market_value" in panel.columns:
+        return _get_series(panel, "market_value")
+    if "shares_outstanding" in panel.columns:
+        return _get_series(panel, "shares_outstanding") * _get_series(panel, "close")
+    raise KeyError("market_value or shares_outstanding is required for market-value-based alphas")
 
 
 def _bool_to_float(x: pd.Series) -> pd.Series:
@@ -532,6 +559,17 @@ def alpha_047(panel: pd.DataFrame, _: Dict) -> pd.Series:
     return (( _rank_xs(1.0 / close) * volume) / adv20) * ((high * _rank_xs(high - close)) / (_sum(high, 5) / 5)) - _rank_xs(vwap - _delay(vwap, 5))
 
 
+def alpha_048(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    left = _ind_neutralize(
+        (_correlation(_delta(close, 1), _delta(_delay(close, 1), 1), 250) * _delta(close, 1)) / close,
+        panel,
+        group_col="industry",
+    )
+    right = _sum((_delta(close, 1) / (_delay(close, 1) ** 2 + 1e-12)), 250)
+    return left / (right + 1e-12)
+
+
 def alpha_049(panel: pd.DataFrame, _: Dict) -> pd.Series:
     close = _get_series(panel, "close")
     x = ((_delay(close, 20) - _delay(close, 10)) / 10) - ((_delay(close, 10) - close) / 10)
@@ -584,10 +622,30 @@ def alpha_055(panel: pd.DataFrame, _: Dict) -> pd.Series:
     return -1.0 * _correlation(_rank_xs(x), _rank_xs(volume), 6)
 
 
+def alpha_056(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    returns = _returns(panel)
+    market_value = _market_value(panel)
+    left = _rank_xs(_sum(returns, 10) / (_sum(_sum(returns, 2), 3) + 1e-12))
+    right = _rank_xs(returns * market_value)
+    return -left * right
+
+
 def alpha_057(panel: pd.DataFrame, _: Dict) -> pd.Series:
     close = _get_series(panel, "close")
     vwap = _vwap(panel)
     return -1.0 * ((close - vwap) / _decay_linear(_rank_xs(_ts_argmax(close, 30)), 2))
+
+
+def alpha_058(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    volume = _get_series(panel, "volume")
+    return -_ts_rank(_decay_linear(_correlation(_ind_neutralize(vwap, panel, "sector"), volume, 3.92795), 7.89291), 5.50322)
+
+
+def alpha_059(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    volume = _get_series(panel, "volume")
+    return -_ts_rank(_decay_linear(_correlation(_ind_neutralize(vwap, panel, "industry"), volume, 4.25197), 16.2289), 8.19648)
 
 
 def alpha_060(panel: pd.DataFrame, _: Dict) -> pd.Series:
@@ -617,6 +675,15 @@ def alpha_062(panel: pd.DataFrame, _: Dict) -> pd.Series:
     left = _rank_xs(_correlation(vwap, _sum(adv20, 22.4101), 9.91009))
     right = _rank_xs((_rank_xs(open_) + _rank_xs(open_)) < (_rank_xs((high + low) / 2) + _rank_xs(high)))
     return -1.0 * _bool_to_float(left < right)
+
+
+def alpha_063(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    open_ = _get_series(panel, "open")
+    vwap = _vwap(panel)
+    left = _rank_xs(_decay_linear(_delta(_ind_neutralize(close, panel, "industry"), 2.25164), 8.22237))
+    right = _rank_xs(_decay_linear(_correlation((vwap * 0.318108) + (open_ * (1 - 0.318108)), _sum(_adv(panel, 180), 37.2467), 13.557), 12.2883))
+    return -(left - right)
 
 
 def alpha_064(panel: pd.DataFrame, _: Dict) -> pd.Series:
@@ -649,6 +716,13 @@ def alpha_066(panel: pd.DataFrame, _: Dict) -> pd.Series:
     return -1.0 * (part1 + part2)
 
 
+def alpha_067(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    high = _get_series(panel, "high")
+    left = _rank_xs(high - _ts_min(high, 2.14593))
+    right = _rank_xs(_correlation(_ind_neutralize(_vwap(panel), panel, "sector"), _ind_neutralize(_adv(panel, 20), panel, "industry"), 6.02936))
+    return -(left ** right)
+
+
 def alpha_068(panel: pd.DataFrame, _: Dict) -> pd.Series:
     high = _get_series(panel, "high")
     close = _get_series(panel, "close")
@@ -659,8 +733,291 @@ def alpha_068(panel: pd.DataFrame, _: Dict) -> pd.Series:
     return -1.0 * _bool_to_float(left < right)
 
 
+def alpha_069(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    close = _get_series(panel, "close")
+    left = _rank_xs(_ts_max(_delta(_ind_neutralize(vwap, panel, "industry"), 2.72412), 4.79344))
+    right = _ts_rank(_correlation((close * 0.490655) + (vwap * (1 - 0.490655)), _adv(panel, 20), 4.92416), 9.0615)
+    return -(left ** right)
+
+
+def alpha_070(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    close = _get_series(panel, "close")
+    left = _rank_xs(_delta(vwap, 1.29456))
+    right = _ts_rank(_correlation(_ind_neutralize(close, panel, "industry"), _adv(panel, 50), 17.8256), 17.9171)
+    return -(left ** right)
+
+
+def alpha_071(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    low = _get_series(panel, "low")
+    open_ = _get_series(panel, "open")
+    vwap = _vwap(panel)
+    left = _ts_rank(_decay_linear(_correlation(_ts_rank(close, 3.43976), _ts_rank(_adv(panel, 180), 12.0647), 18.0175), 4.20501), 15.6948)
+    right = _ts_rank(_decay_linear(_rank_xs((low + open_) - (vwap + vwap)) ** 2, 16.4662), 4.4388)
+    return pd.concat([left, right], axis=1).max(axis=1)
+
+
+def alpha_072(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    vwap = _vwap(panel)
+    volume = _get_series(panel, "volume")
+    left = _rank_xs(_decay_linear(_correlation((high + low) / 2, _adv(panel, 40), 8.93345), 10.1519))
+    right = _rank_xs(_decay_linear(_correlation(_ts_rank(vwap, 3.72469), _ts_rank(volume, 18.5188), 6.86671), 2.95011))
+    return left / (right + 1e-12)
+
+
+def alpha_073(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    open_ = _get_series(panel, "open")
+    low = _get_series(panel, "low")
+    left = _rank_xs(_decay_linear(_delta(vwap, 4.72775), 2.91864))
+    base = (open_ * 0.147155) + (low * (1 - 0.147155))
+    right = _ts_rank(_decay_linear((-_delta(base, 2.03608) / (base + 1e-12)), 3.33829), 16.7411)
+    return -pd.concat([left, right], axis=1).max(axis=1)
+
+
+def alpha_074(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    high = _get_series(panel, "high")
+    vwap = _vwap(panel)
+    volume = _get_series(panel, "volume")
+    left = _rank_xs(_correlation(close, _sum(_adv(panel, 30), 37.4843), 15.1365))
+    right = _rank_xs(_correlation(_rank_xs((high * 0.0261661) + (vwap * (1 - 0.0261661))), _rank_xs(volume), 11.4791))
+    return -_bool_to_float(left < right)
+
+
+def alpha_075(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    volume = _get_series(panel, "volume")
+    low = _get_series(panel, "low")
+    left = _rank_xs(_correlation(vwap, volume, 4.24304))
+    right = _rank_xs(_correlation(_rank_xs(low), _rank_xs(_adv(panel, 50)), 12.4413))
+    return _bool_to_float(left < right)
+
+
+def alpha_076(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    low = _get_series(panel, "low")
+    left = _rank_xs(_decay_linear(_delta(vwap, 1.24383), 11.8259))
+    right = _ts_rank(_decay_linear(_ts_rank(_correlation(_ind_neutralize(low, panel, "sector"), _adv(panel, 81), 8.14941), 19.569), 17.1543), 19.383)
+    return -pd.concat([left, right], axis=1).max(axis=1)
+
+
+def alpha_077(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    left = _rank_xs(_decay_linear(((high + low) / 2) - _vwap(panel), 20.0451))
+    right = _rank_xs(_decay_linear(_correlation((high + low) / 2, _adv(panel, 40), 3.1614), 5.64125))
+    return pd.concat([left, right], axis=1).min(axis=1)
+
+
+def alpha_078(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    low = _get_series(panel, "low")
+    vwap = _vwap(panel)
+    volume = _get_series(panel, "volume")
+    left = _rank_xs(_correlation(_sum((low * 0.352233) + (vwap * (1 - 0.352233)), 19.7428), _sum(_adv(panel, 40), 19.7428), 6.83313))
+    right = _rank_xs(_correlation(_rank_xs(vwap), _rank_xs(volume), 5.77492))
+    return left ** right
+
+
+def alpha_079(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    open_ = _get_series(panel, "open")
+    vwap = _vwap(panel)
+    left = _rank_xs(_delta(_ind_neutralize((close * 0.60733) + (open_ * (1 - 0.60733)), panel, "sector"), 1.23438))
+    right = _rank_xs(_correlation(_ts_rank(vwap, 3.60973), _ts_rank(_adv(panel, 150), 9.18637), 14.6644))
+    return _bool_to_float(left < right)
+
+
+def alpha_080(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    open_ = _get_series(panel, "open")
+    high = _get_series(panel, "high")
+    left = _rank_xs(np.sign(_delta(_ind_neutralize((open_ * 0.868128) + (high * (1 - 0.868128)), panel, "industry"), 4.04545)))
+    right = _ts_rank(_correlation(high, _adv(panel, 10), 5.11456), 5.53756)
+    return -(left ** right)
+
+
+def alpha_081(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    volume = _get_series(panel, "volume")
+    left_corr = _correlation(vwap, _sum(_adv(panel, 10), 49.6054), 8.47743)
+    left = _rank_xs(np.log(_product(_rank_xs(_rank_xs(left_corr) ** 4), 14.9655).clip(lower=1e-12)))
+    right = _rank_xs(_correlation(_rank_xs(vwap), _rank_xs(volume), 5.07914))
+    return -_bool_to_float(left < right)
+
+
+def alpha_082(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    open_ = _get_series(panel, "open")
+    left = _rank_xs(_decay_linear(_delta(open_, 1.46063), 14.8717))
+    right = _ts_rank(_decay_linear(_correlation(_ind_neutralize(_get_series(panel, "volume"), panel, "sector"), open_, 17.4842), 6.92131), 13.4283)
+    return -pd.concat([left, right], axis=1).min(axis=1)
+
+
+def alpha_083(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    close = _get_series(panel, "close")
+    volume = _get_series(panel, "volume")
+    part0 = _rank_xs(_delay((high - low) / ((_sum(close, 5) / 5) + 1e-12), 2))
+    part1 = _rank_xs(_rank_xs(volume))
+    part2 = ((high - low) / ((_sum(close, 5) / 5) + 1e-12)) / ((_vwap(panel) - close) + 1e-12)
+    return part0 * part1 / (part2 + 1e-12)
+
+
+def alpha_084(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    left = _ts_rank(_vwap(panel) - _ts_max(_vwap(panel), 15.3217), 20.7127)
+    return _signedpower(left, _delta(close, 4.96796))
+
+
+def alpha_085(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    high = _get_series(panel, "high")
+    close = _get_series(panel, "close")
+    volume = _get_series(panel, "volume")
+    left = _rank_xs(_correlation((high * 0.876703) + (close * (1 - 0.876703)), _adv(panel, 30), 9.61331))
+    right = _rank_xs(_correlation(_ts_rank((high + _get_series(panel, "low")) / 2, 3.70596), _ts_rank(volume, 10.1595), 7.11408))
+    return left ** right
+
+
+def alpha_086(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    left = _ts_rank(_correlation(close, _sum(_adv(panel, 20), 14.7444), 6.00049), 20.4195)
+    right = _rank_xs(close - _vwap(panel))
+    return -_bool_to_float(left < right)
+
+
+def alpha_087(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    vwap = _vwap(panel)
+    left = _rank_xs(_decay_linear(_delta((close * 0.369701) + (vwap * (1 - 0.369701)), 1.91233), 2.65461))
+    right = _ts_rank(_decay_linear(np.abs(_correlation(_ind_neutralize(_adv(panel, 81), panel, "industry"), close, 13.4132)), 4.89768), 14.4535)
+    return -pd.concat([left, right], axis=1).max(axis=1)
+
+
+def alpha_088(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    open_ = _get_series(panel, "open")
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    close = _get_series(panel, "close")
+    left = _rank_xs(_decay_linear((_rank_xs(open_) + _rank_xs(low)) - (_rank_xs(high) + _rank_xs(close)), 8.06882))
+    right = _ts_rank(_decay_linear(_correlation(_ts_rank(close, 8.44728), _ts_rank(_adv(panel, 60), 20.6966), 8.01266), 6.65053), 2.61957)
+    return pd.concat([left, right], axis=1).min(axis=1)
+
+
+def alpha_089(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    low = _get_series(panel, "low")
+    left = _ts_rank(_decay_linear(_correlation(low, _adv(panel, 10), 6.94279), 5.51607), 3.79744)
+    right = _ts_rank(_decay_linear(_delta(_ind_neutralize(_vwap(panel), panel, "industry"), 3.48158), 10.1466), 15.3012)
+    return left - right
+
+
+def alpha_090(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    low = _get_series(panel, "low")
+    left = _rank_xs(close - _ts_max(close, 4.66719))
+    right = _ts_rank(_correlation(_ind_neutralize(_adv(panel, 40), panel, "industry"), low, 5.38375), 3.21856)
+    return -(left ** right)
+
+
+def alpha_091(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    volume = _get_series(panel, "volume")
+    left = _ts_rank(_decay_linear(_decay_linear(_correlation(_ind_neutralize(close, panel, "industry"), volume, 9.74928), 16.398), 3.83219), 4.8667)
+    right = _rank_xs(_decay_linear(_correlation(_vwap(panel), _adv(panel, 30), 4.01303), 2.6809))
+    return -(left - right)
+
+
+def alpha_092(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    close = _get_series(panel, "close")
+    open_ = _get_series(panel, "open")
+    left = _ts_rank(_decay_linear((((high + low) / 2) + close < (low + open_)).astype(float), 14.7221), 18.8683)
+    right = _ts_rank(_decay_linear(_correlation(_rank_xs(low), _rank_xs(_adv(panel, 30)), 7.58555), 6.94024), 6.80584)
+    return pd.concat([left, right], axis=1).min(axis=1)
+
+
+def alpha_093(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    vwap = _vwap(panel)
+    left = _ts_rank(_decay_linear(_correlation(_ind_neutralize(vwap, panel, "industry"), _adv(panel, 81), 17.4193), 19.848), 7.54455)
+    right = _rank_xs(_decay_linear(_delta((close * 0.524434) + (vwap * (1 - 0.524434)), 2.77377), 16.2664))
+    return left / (right + 1e-12)
+
+
+def alpha_094(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    vwap = _vwap(panel)
+    left = _rank_xs(vwap - _ts_min(vwap, 11.5783))
+    right = _ts_rank(_correlation(_ts_rank(vwap, 19.6462), _ts_rank(_adv(panel, 60), 4.02992), 18.0926), 2.70756)
+    return -(left ** right)
+
+
+def alpha_095(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    open_ = _get_series(panel, "open")
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    left = _rank_xs(open_ - _ts_min(open_, 12.4105))
+    right = _ts_rank(_rank_xs(_correlation(_sum((high + low) / 2, 19.1351), _sum(_adv(panel, 40), 19.1351), 12.8742)) ** 5, 11.7584)
+    return _bool_to_float(left < right)
+
+
+def alpha_096(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    volume = _get_series(panel, "volume")
+    left = _ts_rank(_decay_linear(_correlation(_rank_xs(_vwap(panel)), _rank_xs(volume), 3.83878), 4.16783), 8.38151)
+    right = _ts_rank(_decay_linear(_ts_argmax(_correlation(_ts_rank(close, 7.45404), _ts_rank(_adv(panel, 60), 4.13242), 3.65459), 12.6556), 14.0365), 13.4143)
+    return -pd.concat([left, right], axis=1).max(axis=1)
+
+
+def alpha_097(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    low = _get_series(panel, "low")
+    vwap = _vwap(panel)
+    left = _rank_xs(_decay_linear(_delta(_ind_neutralize((low * 0.721001) + (vwap * (1 - 0.721001)), panel, "industry"), 3.3705), 20.4523))
+    right = _ts_rank(_decay_linear(_ts_rank(_correlation(_ts_rank(low, 7.87871), _ts_rank(_adv(panel, 60), 17.255), 4.97547), 18.5925), 15.7152), 6.71659)
+    return -(left - right)
+
+
+def alpha_098(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    open_ = _get_series(panel, "open")
+    left = _rank_xs(_decay_linear(_correlation(_vwap(panel), _sum(_adv(panel, 5), 26.4719), 4.58418), 7.18088))
+    right = _rank_xs(_decay_linear(_ts_rank(_ts_argmin(_correlation(_rank_xs(open_), _rank_xs(_adv(panel, 15)), 20.8187), 8.62571), 6.95668), 8.07206))
+    return left - right
+
+
+def alpha_099(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    volume = _get_series(panel, "volume")
+    left = _rank_xs(_correlation(_sum((high + low) / 2, 19.8975), _sum(_adv(panel, 60), 19.8975), 8.8136))
+    right = _rank_xs(_correlation(low, volume, 6.28259))
+    return -_bool_to_float(left < right)
+
+
+def alpha_100(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    low = _get_series(panel, "low")
+    high = _get_series(panel, "high")
+    volume = _get_series(panel, "volume")
+    adv20 = _adv(panel, 20)
+    raw = _rank_xs((((close - low) - (high - close)) / ((high - low) + 1e-12)) * volume)
+    part0 = 1.5 * _scale_xs(_ind_neutralize(_ind_neutralize(raw, panel, "industry"), panel, "industry"))
+    part1 = _scale_xs(_ind_neutralize(_correlation(close, _rank_xs(adv20), 5) - _rank_xs(_ts_argmin(close, 30)), panel, "industry"))
+    return -(part0 - part1) * (volume / (adv20 + 1e-12))
+
+
+def alpha_101(panel: pd.DataFrame, _: Dict) -> pd.Series:
+    close = _get_series(panel, "close")
+    open_ = _get_series(panel, "open")
+    high = _get_series(panel, "high")
+    low = _get_series(panel, "low")
+    return (close - open_) / ((high - low) + 0.001)
+
+
 def register_alpha101(registry: FactorRegistry) -> None:
-    """Register Alpha#1-#47, #49-#55, #57, #60-#66, #68."""
+    """Register the full Alpha101 factor set."""
     mapping = {
         "alpha_001": alpha_001,
         "alpha_002": alpha_002,
@@ -709,6 +1066,7 @@ def register_alpha101(registry: FactorRegistry) -> None:
         "alpha_045": alpha_045,
         "alpha_046": alpha_046,
         "alpha_047": alpha_047,
+        "alpha_048": alpha_048,
         "alpha_049": alpha_049,
         "alpha_050": alpha_050,
         "alpha_051": alpha_051,
@@ -716,14 +1074,52 @@ def register_alpha101(registry: FactorRegistry) -> None:
         "alpha_053": alpha_053,
         "alpha_054": alpha_054,
         "alpha_055": alpha_055,
+        "alpha_056": alpha_056,
         "alpha_057": alpha_057,
+        "alpha_058": alpha_058,
+        "alpha_059": alpha_059,
         "alpha_060": alpha_060,
         "alpha_061": alpha_061,
         "alpha_062": alpha_062,
+        "alpha_063": alpha_063,
         "alpha_064": alpha_064,
         "alpha_065": alpha_065,
         "alpha_066": alpha_066,
+        "alpha_067": alpha_067,
         "alpha_068": alpha_068,
+        "alpha_069": alpha_069,
+        "alpha_070": alpha_070,
+        "alpha_071": alpha_071,
+        "alpha_072": alpha_072,
+        "alpha_073": alpha_073,
+        "alpha_074": alpha_074,
+        "alpha_075": alpha_075,
+        "alpha_076": alpha_076,
+        "alpha_077": alpha_077,
+        "alpha_078": alpha_078,
+        "alpha_079": alpha_079,
+        "alpha_080": alpha_080,
+        "alpha_081": alpha_081,
+        "alpha_082": alpha_082,
+        "alpha_083": alpha_083,
+        "alpha_084": alpha_084,
+        "alpha_085": alpha_085,
+        "alpha_086": alpha_086,
+        "alpha_087": alpha_087,
+        "alpha_088": alpha_088,
+        "alpha_089": alpha_089,
+        "alpha_090": alpha_090,
+        "alpha_091": alpha_091,
+        "alpha_092": alpha_092,
+        "alpha_093": alpha_093,
+        "alpha_094": alpha_094,
+        "alpha_095": alpha_095,
+        "alpha_096": alpha_096,
+        "alpha_097": alpha_097,
+        "alpha_098": alpha_098,
+        "alpha_099": alpha_099,
+        "alpha_100": alpha_100,
+        "alpha_101": alpha_101,
     }
     for name, fn in mapping.items():
         registry.register(name, fn, mode="panel")

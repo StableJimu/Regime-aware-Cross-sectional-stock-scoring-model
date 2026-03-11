@@ -642,6 +642,7 @@ class ScoringModel:
         regime_masks: Dict[int, pd.Series],
         market_regime_proba: pd.DataFrame,
         window_days: int,
+        max_train_date: Optional[pd.Timestamp] = None,
     ) -> pd.DataFrame:
         """Rolling ridge per regime over trailing window_days."""
         if not self.selected_factors_:
@@ -659,16 +660,24 @@ class ScoringModel:
         # pre-join for speed
         base = factor_panel.copy()
         base["label"] = y
+        train_cutoff = None if max_train_date is None else pd.Timestamp(max_train_date)
 
         for i, d in enumerate(unique_dates):
-            win_start = max(0, i - window_days + 1)
-            win_dates = unique_dates[win_start : i + 1]
+            hist_dates = unique_dates[unique_dates < d]
+            if train_cutoff is not None:
+                hist_dates = hist_dates[hist_dates <= train_cutoff]
+            if len(hist_dates) == 0:
+                continue
+            win_dates = hist_dates[-window_days:]
             win_mask_dates = dates.isin(win_dates)
 
-            if self.cfg.selection_refit_days and (i % int(self.cfg.selection_refit_days) == 0):
+            allow_selection_refit = train_cutoff is None or d <= train_cutoff
+            if allow_selection_refit and self.cfg.selection_refit_days and (i % int(self.cfg.selection_refit_days) == 0):
+                sel_hist_dates = hist_dates
+                if len(sel_hist_dates) == 0:
+                    continue
                 sel_win_days = int(self.cfg.selection_window_days or window_days)
-                sel_start = max(0, i - sel_win_days + 1)
-                sel_dates = unique_dates[sel_start : i + 1]
+                sel_dates = sel_hist_dates[-sel_win_days:]
                 sel_mask_dates = dates.isin(sel_dates)
                 new_selected: Dict[int, List[str]] = {}
                 for k, mask in regime_masks.items():

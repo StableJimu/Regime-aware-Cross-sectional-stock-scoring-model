@@ -74,7 +74,9 @@ def _calibrate_scores_linear(
 
     out = score_panel.copy()
     out["score_raw"] = out["score"]
-    out["score"] = a + b * out["score_raw"]
+    out["score_calibrated"] = a + b * out["score_raw"]
+    # Keep ranking on raw cross-sectional scores; calibrated values are diagnostic only.
+    out["score"] = out["score_raw"]
     return out
 
 
@@ -97,6 +99,7 @@ def main() -> None:
         start_date=cfg["data"]["start_date"],
         end_date=cfg["data"]["end_date"],
         panel_path=Path(cfg["paths"]["panel_path"]) if cfg["paths"].get("panel_path") else None,
+        market_index_path=Path(cfg["paths"]["market_index_path"]) if cfg["paths"].get("market_index_path") else None,
         rates_path=Path(cfg["paths"]["rates_path"]) if cfg["paths"].get("rates_path") else None,
         market_proxy_ticker=cfg["data"].get("market_proxy_ticker", "SPY"),
     )

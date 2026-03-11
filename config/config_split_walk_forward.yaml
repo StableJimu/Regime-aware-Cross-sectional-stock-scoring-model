@@ -2,14 +2,16 @@ paths:
   project_root: "."
   raw_dir: "data/raw"
   panel_path: "data/raw/ohlcv_1d_panel.csv"
-  universe_path: null
+  market_index_path: "data/raw/market_index_panel.csv"
+  universe_path: "data/raw/universe.csv"
   vix_path: "data/raw/vix.csv"
+  sector_map_path: "data/raw/sector_map.csv"
   regime_hmm_path: "data/raw/market_regime_hmm.csv"
   factors_manifest: "data/factors/factors_manifest.json"
   rates_path: null
   factors_dir: "data/factors"
   model_dir: "data/model_params"
-  backtest_dir: "data/backtest_split_no_turnover"
+  backtest_dir: "data/backtest_split_walk_forward"
 
 data:
   start_date: "2019-01-01"
@@ -23,10 +25,13 @@ factors:
     "alpha_011","alpha_012","alpha_013","alpha_014","alpha_015","alpha_016","alpha_017","alpha_018","alpha_019","alpha_020",
     "alpha_021","alpha_022","alpha_023","alpha_024","alpha_025","alpha_026","alpha_027","alpha_028","alpha_029","alpha_030",
     "alpha_031","alpha_032","alpha_033","alpha_034","alpha_035","alpha_036","alpha_037","alpha_038","alpha_039","alpha_040",
-    "alpha_041","alpha_042","alpha_043","alpha_044","alpha_045","alpha_046","alpha_047",
-    "alpha_049","alpha_050","alpha_051","alpha_052","alpha_053","alpha_054","alpha_055",
-    "alpha_057",
-    "alpha_060","alpha_061","alpha_062","alpha_064","alpha_065","alpha_066","alpha_068"
+    "alpha_041","alpha_042","alpha_043","alpha_044","alpha_045","alpha_046","alpha_047","alpha_048","alpha_049","alpha_050",
+    "alpha_051","alpha_052","alpha_053","alpha_054","alpha_055","alpha_056","alpha_057","alpha_058","alpha_059","alpha_060",
+    "alpha_061","alpha_062","alpha_063","alpha_064","alpha_065","alpha_066","alpha_067","alpha_068","alpha_069","alpha_070",
+    "alpha_071","alpha_072","alpha_073","alpha_074","alpha_075","alpha_076","alpha_077","alpha_078","alpha_079","alpha_080",
+    "alpha_081","alpha_082","alpha_083","alpha_084","alpha_085","alpha_086","alpha_087","alpha_088","alpha_089","alpha_090",
+    "alpha_091","alpha_092","alpha_093","alpha_094","alpha_095","alpha_096","alpha_097","alpha_098","alpha_099","alpha_100",
+    "alpha_101"
   ]
 
 regime:
@@ -46,6 +51,7 @@ model:
   ridge_alpha: 1.0
   score_calibration: "linear"
   rolling_train_days: 252
+  validation_mode: "walk_forward"
   selection_method: "regime_stepwise"
   selection_top_n: 5
   use_regime: true
@@ -87,5 +93,5 @@ backtest:
   robust_min_leverage: 0.0
   robust_target_leverage: null
   robust_breadth_n: 20
-  stress_costs_bps: [0]
-  stress_short_fee_bps: [0]
+  stress_costs_bps: [0, 5, 10, 20]
+  stress_short_fee_bps: [0, 0, 100, 300]

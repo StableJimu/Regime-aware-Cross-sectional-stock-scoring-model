@@ -1,26 +1,32 @@
 # Cross Sectional Stock Selection Project
 
-Validated quant research pipeline for cross-sectional equity selection using Alpha101-style factors, regime-aware model selection, train/validation backtesting, and full-history backtesting.
+Cross-sectional equity research pipeline using Alpha101-style factors, regime-aware model selection, and both full-history and train/validation backtests.
 
 ## Current Status
 
-The project has now been exercised locally against the current workspace data.
+The current repo state has been validated locally against the workspace data.
 
-- Factor generation works and writes outputs to `data/factors/`.
-- Train/validation split backtests work end-to-end and write outputs under a separate run folder.
-- Full backtests work end-to-end using a precomputed regime file.
-- Plot generation works when a non-interactive matplotlib backend is used.
+- Factor generation writes parquet batches to `data/factors/`.
+- Full backtests run end to end with a precomputed HMM regime file.
+- Split backtests run end to end in both walk-forward and frozen validation modes.
+- Plot generation works reliably with a non-interactive matplotlib backend.
 
 Current caveats:
 
-- The full backtest path still depends on an existing `data/raw/market_regime_hmm.csv`.
-- The standalone `run_hmm_regime.py` path may still be environment-sensitive because of the local scientific Python stack.
-- The full backtest path currently writes performance outputs and metadata, but not `scores.parquet`.
+- The full backtest path still expects an existing `data/raw/market_regime_hmm.csv`.
+- The standalone `run_hmm_regime.py` path can still be sensitive to the local scientific Python stack on Windows.
+- The full backtest path still writes performance and metadata, but not `scores.parquet`.
 
-## Current Structure
+## Repo Layout
 
 - `config/config.yaml`
-  Central runtime configuration for paths, dates, factors, model selection, and backtest settings.
+  Canonical full-backtest config.
+
+- `config/config_split_walk_forward.yaml`
+  Canonical split backtest config with walk-forward validation.
+
+- `config/config_split_frozen.yaml`
+  Canonical split backtest config with frozen validation.
 
 - `quant_pipeline/pipeline/`
   Core library code for loading data, computing factors, selecting factors, fitting scoring models, and backtesting.
@@ -52,6 +58,9 @@ Optional local files:
 - `data/raw/vix.csv`
   Used by `run_hmm_regime.py` only when `--use-vix` is passed.
 
+- `data/raw/sector_map.csv`
+  Current sector metadata proxy for the ticker universe. This is used for the expanded Alpha101 layer where sector or market-value proxies are needed.
+
 Generated outputs:
 
 - `data/factors/`
@@ -63,7 +72,7 @@ Generated outputs:
 - `data/model_params/`
   Reserved for saved model artifacts.
 
-## How The Current Pipeline Works
+## Pipeline Modes
 
 The pipeline currently runs in two distinct modes.
 
@@ -94,7 +103,7 @@ The pipeline currently runs in two distinct modes.
 
 Important detail:
 - `run_backtest.py` does not fit the HMM itself. It expects `market_regime_hmm.csv` to already exist.
-- This path has been validated locally after fixing the broken backtest loop in `run_backtest.py`.
+- This path has been validated locally.
 
 ### Mode 2: Train/Validation Split Backtest
 
@@ -121,7 +130,8 @@ Important detail:
      - `regime_proba.parquet`
 
 Important detail:
-- `run_backtest_split.py` does fit the HMM itself. It does not require a pre-existing `market_regime_hmm.csv`.
+- `run_backtest_split.py` fits the HMM inside the split workflow. It does not require a pre-existing `market_regime_hmm.csv`.
+- The split path supports both `validation_mode: walk_forward` and `validation_mode: frozen`.
 - This path has been validated locally with a 5-year train / 2-year validation run.
 
 ## Factor Layer
@@ -171,6 +181,10 @@ Optional behavior:
 - soft regime weighting in split backtests
 - linear score calibration via `model.score_calibration: linear`
 
+Important detail:
+- Rank-based backtests such as `top_q` use `score_raw` for ranking.
+- The calibrated score is retained only as a diagnostic field for future optimization-based portfolio construction such as `robust_spo`.
+
 ## Backtest Layer
 
 Implemented portfolio methods:
@@ -188,96 +202,137 @@ Backtester behavior:
 - Applies turnover-based transaction costs.
 - Applies daily short borrow fees when configured.
 
-## Typical Commands
+## Quick Start
 
-### 1. Compute factor batches
+### 1. Download local data inputs
+
+Prices and market ETFs:
+
+```bash
+python -m quant_pipeline.scripts.download_prices
+```
+
+VIX:
+
+```bash
+python -m quant_pipeline.scripts.download_vix
+```
+
+Treasury yields:
+
+```bash
+python -m quant_pipeline.scripts.download_fred_yields
+```
+
+Sector metadata:
+
+```bash
+python -m quant_pipeline.scripts.download_sector_map
+```
+
+### 2. Compute factors
 
 ```bash
 python -m quant_pipeline.scripts.compute_factors_batch
 ```
 
-Outputs:
-
-```text
-data/factors/factors_raw_batch_*.parquet
-data/factors/factors_manifest.json
-```
-
-### 2. Fit standalone market HMM
-
-```bash
-python -m quant_pipeline.scripts.run_hmm_regime --k 3
-```
-
-Optional VIX input:
+### 3. Build the standalone HMM for the full backtest
 
 ```bash
 python -m quant_pipeline.scripts.run_hmm_regime --k 3 --use-vix
 ```
 
-Output:
+### 4. Run backtests
 
-```text
-data/raw/market_regime_hmm.csv
-```
-
-### 3. Run full backtest using precomputed HMM
+Full backtest:
 
 ```bash
 python -m quant_pipeline.scripts.run_backtest --stress-level all
 ```
 
-Stress level options:
-
-- `low`
-- `medium`
-- `high`
-- `all`
-
-### 4. Run train/validation backtest
-
-```bash
-python -m quant_pipeline.scripts.run_backtest_split --train-years 5 --val-years 2 --stress-level high
-```
-
-Example validated no-cost split config:
+Walk-forward split backtest:
 
 ```bash
 python -m quant_pipeline.scripts.run_backtest_split \
-  --config config/config_split_no_turnover.yaml \
+  --config config/config_split_walk_forward.yaml \
+  --train-years 5 \
+  --val-years 2 \
+  --stress-level all
+```
+
+Frozen split backtest:
+
+```bash
+python -m quant_pipeline.scripts.run_backtest_split \
+  --config config/config_split_frozen.yaml \
   --train-years 5 \
   --val-years 2 \
   --stress-level low
 ```
 
-### 5. Plot outputs
+### 5. Plot results
 
-Single-run performance:
+Full run:
 
 ```bash
 python -m quant_pipeline.scripts.plot_performance --run-dir data/backtest/<run_id>
 ```
 
-Split backtest plot:
+Split run:
 
 ```bash
-python -m quant_pipeline.scripts.plot_performance --run-dir data/backtest/<run_id> --split --split-suffix cost20_fee300
+python -m quant_pipeline.scripts.plot_performance \
+  --run-dir data/backtest_split_walk_forward/<run_id> \
+  --split \
+  --split-suffix cost0_fee0
 ```
 
 In this environment, plotting is most reliable with a non-interactive backend:
 
 ```bash
 set MPLBACKEND=Agg
-python -m quant_pipeline.scripts.plot_performance --run-dir data/backtest/<run_id> --split --split-suffix cost0_fee0 --no-show
+python -m quant_pipeline.scripts.plot_performance --run-dir data/backtest/<run_id> --no-show
 ```
 
-### 6. Compute IC for specific factors
+## Data Sources
+
+- `yfinance`
+  - daily OHLCV proxy for the fixed ticker universe
+  - market proxy ETF panel
+  - ticker metadata used as a sector and market-value proxy
+
+- `Cboe VIX history CSV`
+  - public VIX history download
+
+- `FRED`
+  - public treasury yield series
+
+Important caveats:
+
+- Yahoo Finance is a practical daily data source, not an exchange-grade source.
+- The sector map generated from Yahoo metadata is current or recent metadata, not
+  point-in-time historical GICS history.
+- This is good enough for continuing research on the current fixed universe, but
+  it is not a substitute for institutional-quality historical reference data.
+
+Compute IC for specific factors:
 
 ```bash
 python -m quant_pipeline.scripts.compute_factor_ic --factors alpha_054,alpha_025,alpha_033
 ```
 
-## Current Configuration Knobs
+## Configuration
+
+The config surface is intentionally small:
+
+- `config/config.yaml`
+  - full backtest
+
+- `config/config_split_walk_forward.yaml`
+  - split backtest with rolling refits during validation using only prior data
+
+- `config/config_split_frozen.yaml`
+  - split backtest with train-only fitting and fixed validation scoring
 
 Important config sections in `config/config.yaml`:
 
@@ -311,8 +366,8 @@ Used by optional or non-default paths:
 - `matplotlib`
   - required for `plot_performance.py`
 
-- `databento`
-  - required for the download scripts
+- `yfinance`
+  - required for the public price and sector download scripts
 
 - `torch`
   - required only when `model.model_family: lstm`
@@ -322,9 +377,8 @@ Used by optional or non-default paths:
 
 ## Current Limitations
 
-- The package entrypoint in `quant_pipeline/scripts/main.py` is only a thin backtest wrapper.
 - The full backtest path relies on a separately generated HMM CSV rather than fitting the regime model inline.
 - The standalone HMM script can still fail in some Windows scientific Python environments because of the `sklearn` / `threadpoolctl` stack.
 - The full backtest path currently does not save `scores.parquet`, so full-run IC/IR plotting is limited.
-- Several downloader scripts still contain user-specific assumptions beyond the new path layout.
+- Sector metadata is currently a static current snapshot and is not point-in-time.
 - There is not yet a formal `tests/` suite.

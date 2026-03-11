@@ -15,4 +15,4 @@ dependencies:
   - pytorch>=2.6
   - pip
   - pip:
-      - databento>=0.39
+      - yfinance>=0.2.54
